@@ -19,6 +19,8 @@ What it modifies:
 - All xxd-style outputs (`--xxd-full-dir`, `--xxd-diff*`) use the new 4×4 grouping.
 
 Everything remains **read-only**: no binary dumps are written or modified.
+
+Copyright (c) 2025, ChatGPT-5 & me
 """
 
 from __future__ import annotations
@@ -148,13 +150,9 @@ def blocks_that_differ(datas: List[bytes], total_blocks: int) -> List[int]:
 
 
 def unit_offsets(size: int) -> List[int]:
-    if size == 2:
-        return [0, 2, 4, 6, 8, 10, 12, 14]
-    if size == 4:
-        return [0, 4, 8, 12]
-    if size == 8:
-        return [0, 8]
-    raise ValueError("invalid unit size; expected 2, 4, or 8")
+    if size not in (2, 4, 8):
+        raise ValueError("invalid unit size; expected 2, 4, or 8")
+    return list(range(0, BYTES_PER_BLOCK, size))
 
 
 # --- SAME byte computations for exports --------------------------------------

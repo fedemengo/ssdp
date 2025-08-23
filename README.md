@@ -73,7 +73,7 @@ Diff blocks:
 
 From the output and what it's known about the credit on the tag, it's clear that
 
-- `S1B2`: holds information that are not trivially related to the data
+- `S1B2`: holds information that is not trivially related to the data
 
 - `S2B0` (`block8`):
     - bytes `S2B0+00-04` contains the current credit in cents (`150` -> `1.5` for dump1, `350` -> `3.5` for dump2)

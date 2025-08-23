@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-classic-diff — minimal MIFARE Classic dump comparator (v0.9)
+classic-diff — minimal MIFARE Classic dump comparator (v0.13)
 
-Updates in v0.9:
-- Added NOT_RAW (hex of bitwise-NOTed unit bytes) as an optional display column.
-- --show can now include NOT_RAW; --colorize can target NOT_RAW too (with validation).
-- RAW remains always shown; NOT_RAW is shown only if selected via --show.
+New in v0.13:
+- **xxd formatting** now groups bytes **4-by-4** (extra gap between groups).
+- In diff exports, each differing block now includes a leading **"same"** line that shows only
+  the bytes that are identical across all inputs; bytes that differ are left **blank** (kept
+  aligned). Example:
 
-Recent features:
-- --show selects which columns to display per unit (subset of INT_BE,INT_LE,NOT_BE,NOT_LE,BIN,BIN_NOT,NOT_RAW).
-- --colorize accepts a comma-separated list (RAW and/or any shown columns). Errors if you colorize a column you didn't show.
-- Only differing units are printed in detail; FULL 16-byte orientation lines stay highlighted per alias.
+    [BLOCK] S=12 B=1 (abs=49)
+    same  00000130: 4B 4B 20 20   20 20 20 20   11 22       44            KK  ..    .."  D
+    data01 00000130: 4B 4B 20 21   20 20 20 20   11 22 33 44 55 66 77 88  KK !    .."3DUfw.
 
-Spec:
-- Formats: mf1k (1K, 64 blocks) and mf4k (4K, 256 blocks)
-- Inputs: ≥2 raw dumps with exact length for the chosen format
-- Step 1: Identify 16-byte blocks that differ across files
-- Step 2: For each differing block, print selected unit sizes (2/4/8)
-    * Show RAW + user-selected columns, only for differing units
-- Color: each alias assigned a distinct ANSI color (cycled if more aliases than colors)
+  (The hex gaps reflect groups of 4; blanks keep columns aligned.)
+
+What it modifies:
+- `--xxd-diff` and `--xxd-diff-first` now include the `same` line per differing block.
+- All xxd-style outputs (`--xxd-full-dir`, `--xxd-diff*`) use the new 4×4 grouping.
+
+Everything remains **read-only**: no binary dumps are written or modified.
 """
 
 from __future__ import annotations
@@ -38,8 +38,9 @@ ANSI_COLORS = [
     "\033[34m",  # blue
 ]
 ANSI_RESET = "\033[0m"
+ANSI_DIM = "\033[2m"
 
-ALL_COLUMNS = ["NOT_RAW", "INT_BE", "INT_LE", "NOT_BE", "NOT_LE", "BIN", "BIN_NOT"]
+ALL_COLUMNS = ["INT_BE", "INT_LE", "NOT_BE", "NOT_LE", "BIN", "BIN_NOT", "NOT_RAW"]
 ALLOWED_COLORIZE = ["RAW"] + ALL_COLUMNS
 
 # --- Per-format configuration -------------------------------------------------
@@ -94,6 +95,10 @@ def hex_bytes(b: bytes) -> str:
     return " ".join(f"{x:02X}" for x in b)
 
 
+def ascii_bytes(b: bytes) -> str:
+    return "".join(chr(x) if 32 <= x <= 126 else "." for x in b)
+
+
 def int_be(b: bytes) -> int:
     return int.from_bytes(b, byteorder="big", signed=False)
 
@@ -108,6 +113,24 @@ def bitwise_not_bytes(b: bytes) -> bytes:
 
 def bin_str(val: int, bit_width: int) -> str:
     return format(val, f"0{bit_width}b")
+
+
+def parse_units_arg(units_arg: str | None) -> List[int]:
+    if not units_arg:
+        return [2, 4, 8]
+    try:
+        parts = [p.strip() for p in units_arg.split(",") if p.strip()]
+        units = [int(p) for p in parts]
+    except ValueError:
+        print(
+            "error: --units must be a comma-separated list of 2, 4, 8", file=sys.stderr
+        )
+        sys.exit(2)
+    valid = {2, 4, 8}
+    if any(u not in valid for u in units):
+        print("error: --units values must be among {2,4,8}", file=sys.stderr)
+        sys.exit(2)
+    return units
 
 
 # --- Core diff logic ----------------------------------------------------------
@@ -134,29 +157,122 @@ def unit_offsets(size: int) -> List[int]:
     raise ValueError("invalid unit size; expected 2, 4, or 8")
 
 
-def parse_units_arg(units_arg: str | None) -> List[int]:
-    if not units_arg:
-        return [2, 4, 8]
-    try:
-        parts = [p.strip() for p in units_arg.split(",") if p.strip()]
-        units = [int(p) for p in parts]
-    except ValueError:
-        print(
-            "error: --units must be a comma-separated list of 2, 4, 8", file=sys.stderr
-        )
-        sys.exit(2)
-    valid = {2, 4, 8}
-    if any(u not in valid for u in units):
-        print("error: --units values must be among {2,4,8}", file=sys.stderr)
-        sys.exit(2)
-    return units
+# --- SAME byte computations for exports --------------------------------------
 
 
-# --- Printing helpers ---------------------------------------------------------
+def same_byte_mask(block_slices: List[bytes]) -> List[bool]:
+    """Return a 16-length mask where True means the byte is equal across all slices."""
+    mask = [True] * BYTES_PER_BLOCK
+    first = block_slices[0]
+    for j in range(BYTES_PER_BLOCK):
+        v = first[j]
+        for s in block_slices[1:]:
+            if s[j] != v:
+                mask[j] = False
+                break
+    return mask
 
 
-def colorize(s: str, color: str, enable: bool) -> str:
-    return f"{color}{s}{ANSI_RESET}" if enable else s
+# --- xxd-style export helpers (4x4 grouping) ---------------------------------
+
+
+def _hex_groups_4x4(sixteen: bytes, mask: List[bool] | None = None) -> str:
+    """Return hex string grouped 4-by-4, double space between groups.
+    If mask is given (len 16), print byte hex if mask[i] True, else two spaces.
+    """
+    tokens: List[str] = []
+    for i, b in enumerate(sixteen):
+        if mask is None or mask[i]:
+            tokens.append(f"{b:02x}")
+        else:
+            tokens.append("  ")  # keep column width
+    groups: List[str] = []
+    for g in range(4):
+        start = g * 4
+        grp = " ".join(tokens[start : start + 4])
+        groups.append(grp)
+    return "  ".join(groups)
+
+
+def _ascii_groups_4x4(sixteen: bytes, mask: List[bool] | None = None) -> str:
+    chars: List[str] = []
+    for i, b in enumerate(sixteen):
+        ch = chr(b) if 32 <= b <= 126 else "."
+        if mask is not None and not mask[i]:
+            ch = " "  # blank out differing bytes
+        chars.append(ch)
+    return "".join(chars)
+
+
+def xxd_line_group4(offset: int, sixteen: bytes, mask: List[bool] | None = None) -> str:
+    left = f"{offset:08x}:"
+    hex_part = _hex_groups_4x4(sixteen, mask)
+    ascii_part = _ascii_groups_4x4(sixteen, mask)
+    return f"{left} {hex_part}  {ascii_part}"
+
+
+def write_xxd_full(dirpath: Path, aliases: List[str], datas: List[bytes]):
+    dirpath.mkdir(parents=True, exist_ok=True)
+    for alias, data in zip(aliases, datas):
+        out_path = dirpath / f"{alias}.xxd"
+        with out_path.open("w", encoding="utf-8") as f:
+            for off in range(0, len(data), BYTES_PER_BLOCK):
+                chunk = data[off : off + BYTES_PER_BLOCK]
+                f.write(xxd_line_group4(off, chunk) + "\n")
+
+
+def write_xxd_diff(
+    path: Path, fmt: str, aliases: List[str], datas: List[bytes], diff_blocks: List[int]
+):
+    with path.open("w", encoding="utf-8") as f:
+        for abs_block in diff_blocks:
+            s, b = FORMAT_CFG[fmt]["to_sector_block"](abs_block)
+            block_start = abs_block * BYTES_PER_BLOCK
+            slices = [d[block_start : block_start + BYTES_PER_BLOCK] for d in datas]
+            mask = same_byte_mask(slices)
+            f.write(f"[BLOCK] S={s} B={b} (abs={abs_block})\n")
+            # SAME line: show only identical bytes across all inputs
+            f.write("same   " + xxd_line_group4(block_start, slices[0], mask) + "\n")
+            # Then each alias line (full bytes)
+            for alias, chunk in zip(aliases, slices):
+                f.write(f"{alias} " + xxd_line_group4(block_start, chunk) + "\n")
+            f.write("\n")
+
+
+def write_xxd_diff_first(
+    path: Path,
+    fmt: str,
+    first_alias: str,
+    first_data: bytes,
+    diff_blocks: List[int],
+    other_datas: List[bytes],
+):
+    with path.open("w", encoding="utf-8") as f:
+        for abs_block in diff_blocks:
+            s, b = FORMAT_CFG[fmt]["to_sector_block"](abs_block)
+            block_start = abs_block * BYTES_PER_BLOCK
+            first_chunk = first_data[block_start : block_start + BYTES_PER_BLOCK]
+            # Build mask vs all inputs (first + others)
+            slices = [first_data[block_start : block_start + BYTES_PER_BLOCK]] + [
+                d[block_start : block_start + BYTES_PER_BLOCK] for d in other_datas
+            ]
+            mask = same_byte_mask(slices)
+            f.write(f"[BLOCK] S={s} B={b} (abs={abs_block})\n")
+            f.write("same  " + xxd_line_group4(block_start, first_chunk, mask) + "\n")
+            f.write(
+                f"{first_alias} " + xxd_line_group4(block_start, first_chunk) + "\n\n"
+            )
+
+
+# --- Printing (console) -------------------------------------------------------
+
+
+def colorize_token(token: str, color: str, enable: bool) -> str:
+    return f"{color}{token}{ANSI_RESET}" if enable else token
+
+
+def dim_token(token: str, enable: bool) -> str:
+    return f"{ANSI_DIM}{token}{ANSI_RESET}" if enable else token
 
 
 def print_input_aliases(names: List[str], aliases: List[str]):
@@ -177,6 +293,52 @@ def print_header_diff_blocks(
         s, b = to_sector_block(i)
         print(f"  S={s} B={b} (abs={i})")
     print()
+
+
+# --- "same" computation for console (already in v0.12) -----------------------
+
+
+def units_equal(datas: List[bytes], block_start: int, off: int, size: int) -> bool:
+    a = datas[0][block_start + off : block_start + off + size]
+    return all(d[block_start + off : block_start + off + size] == a for d in datas[1:])
+
+
+def collect_same_unit_offsets(
+    datas: List[bytes], block_start: int, size: int
+) -> List[int]:
+    return [
+        off for off in unit_offsets(size) if units_equal(datas, block_start, off, size)
+    ]
+
+
+def collect_same_byte_idxs(datas: List[bytes], block_start: int) -> set[int]:
+    idxs: set[int] = set()
+    for j in range(BYTES_PER_BLOCK):
+        b0 = datas[0][block_start + j]
+        if all(d[block_start + j] == b0 for d in datas[1:]):
+            idxs.add(j)
+    return idxs
+
+
+def idxs_to_ranges_str(sorted_idxs: List[int]) -> str:
+    if not sorted_idxs:
+        return "(none)"
+    ranges = []
+    start = prev = sorted_idxs[0]
+    for x in sorted_idxs[1:]:
+        if x == prev + 1:
+            prev = x
+            continue
+        ranges.append((start, prev))
+        start = prev = x
+    ranges.append((start, prev))
+    parts = []
+    for a, b in ranges:
+        if a == b:
+            parts.append(f"{a:02d}")
+        else:
+            parts.append(f"{a:02d}-{b:02d}")
+    return ", ".join(parts)
 
 
 # --- Column selection & colorization -----------------------------------------
@@ -226,7 +388,7 @@ def parse_colorize_arg(colorize_arg: str | None, show_cols: List[str]) -> List[s
     return out
 
 
-# --- Block printing -----------------------------------------------------------
+# --- Console block printing ---------------------------------------------------
 
 
 def print_block_units(
@@ -238,6 +400,7 @@ def print_block_units(
     use_color: bool,
     show_cols: List[str],
     colorize_cols: List[str],
+    show_same_mode: str,
 ):
     s, b = to_sector_block(abs_block)
     print(f"[BLOCK] S={s} B={b} (abs={abs_block})")
@@ -248,30 +411,64 @@ def print_block_units(
 
     width_map = {2: 5, 4: 10, 8: 20}
 
+    same_bytes_global = (
+        collect_same_byte_idxs(datas, block_start)
+        if show_same_mode in ("bytes", "both")
+        else set()
+    )
+
     for size in units:
         print(f"  [units={size}]")
-        # Find differing unit offsets for this size
         differing_offsets: List[int] = []
+        same_offsets: List[int] = [] if show_same_mode in ("units", "both") else []
         for off in unit_offsets(size):
-            units_here = [
-                d[block_start + off : block_start + off + size] for d in datas
-            ]
-            if any(u != units_here[0] for u in units_here[1:]):
+            a = datas[0][block_start + off : block_start + off + size]
+            equal_all = all(
+                d[block_start + off : block_start + off + size] == a for d in datas[1:]
+            )
+            if equal_all:
+                if show_same_mode in ("units", "both"):
+                    same_offsets.append(off)
+            else:
                 differing_offsets.append(off)
-        # Orientation: FULL block (with differing units highlighted)
+
         for data, alias, col in zip(full_slices, aliases, colors):
-            raw_hex = hex_bytes(data)
-            if differing_offsets:
-                chunks = []
-                for j in range(0, BYTES_PER_BLOCK, size):
-                    unit_bytes = data[j : j + size]
+            chunks: List[str] = []
+            for j in range(0, BYTES_PER_BLOCK, size):
+                unit_bytes = data[j : j + size]
+                if j in differing_offsets:
                     raw = " ".join(f"{x:02X}" for x in unit_bytes)
-                    differs = j in differing_offsets
-                    chunk = colorize(raw, col, use_color) if differs else raw
-                    chunks.append(chunk)
-                raw_hex = " | ".join(chunks)
+                    chunks.append(colorize_token(raw, col, use_color))
+                elif show_same_mode in ("units", "both") and j in same_offsets:
+                    raw = " ".join(f"{x:02X}" for x in unit_bytes)
+                    chunks.append(dim_token(raw, use_color))
+                elif show_same_mode in ("bytes", "both") and same_bytes_global:
+                    parts = []
+                    for k, x in enumerate(unit_bytes):
+                        token = f"{x:02X}"
+                        idx = j + k
+                        parts.append(
+                            dim_token(token, use_color)
+                            if idx in same_bytes_global
+                            else token
+                        )
+                    chunks.append(" ".join(parts))
+                else:
+                    chunks.append(" ".join(f"{x:02X}" for x in unit_bytes))
+            raw_hex = " | ".join(chunks)
             print(f"    {alias}: FULL={raw_hex}")
-        # Detailed rows: only differing units
+
+        if show_same_mode in ("units", "both"):
+            offs = (
+                " ".join(f"+{o:02d}" for o in same_offsets)
+                if same_offsets
+                else "(none)"
+            )
+            print(f"    Same units (size={size}): {offs}")
+        if show_same_mode in ("bytes", "both") and same_bytes_global:
+            rng = idxs_to_ranges_str(sorted(same_bytes_global))
+            print(f"    Same bytes: {rng}")
+
         for off in differing_offsets:
             print(f"    +{off:02d}")
             for data, alias, col in zip(datas, aliases, colors):
@@ -288,18 +485,14 @@ def print_block_units(
                 not_raw_hex = hex_bytes(not_bytes)
                 w = width_map[size]
 
-                # Build ordered column list
                 parts = []
-                # RAW always first
                 raw_out = raw_hex
                 if "RAW" in colorize_cols:
-                    raw_out = colorize(raw_out, col, use_color)
+                    raw_out = colorize_token(raw_out, col, use_color)
                 parts.append(f"RAW={raw_out}")
 
                 for cname in show_cols:
-                    if cname == "NOT_RAW":
-                        val = not_raw_hex
-                    elif cname == "INT_BE":
+                    if cname == "INT_BE":
                         val = f"{be:>{w}d}"
                     elif cname == "INT_LE":
                         val = f"{le:>{w}d}"
@@ -311,10 +504,12 @@ def print_block_units(
                         val = bin_norm
                     elif cname == "BIN_NOT":
                         val = bin_not
+                    elif cname == "NOT_RAW":
+                        val = not_raw_hex
                     else:
                         continue
                     if cname in colorize_cols:
-                        val = colorize(val, col, use_color)
+                        val = colorize_token(val, col, use_color)
                     parts.append(f"{cname}={val}")
 
                 print(f"      {alias}: " + " | ".join(parts))
@@ -326,7 +521,7 @@ def print_block_units(
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Compare MIFARE Classic dumps (mf1k/mf4k) at 2/4/8-byte units (v0.9)"
+        description="Compare MIFARE Classic dumps (mf1k/mf4k) at 2/4/8-byte units (v0.13)"
     )
     ap.add_argument(
         "--format", required=True, choices=["mf1k", "mf4k"], help="Input format"
@@ -343,7 +538,30 @@ def main():
         "--colorize",
         help="Comma-separated list of columns to colorize: RAW and/or any shown columns. Default: RAW",
     )
-    ap.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
+    ap.add_argument(
+        "--show-same",
+        choices=["none", "units", "bytes", "both"],
+        default="none",
+        help="Highlight what is identical across inputs at the unit and/or byte level (console only).",
+    )
+    ap.add_argument(
+        "--xxd-diff",
+        type=Path,
+        help="Write xxd-like report of differing blocks for all inputs to this file",
+    )
+    ap.add_argument(
+        "--xxd-diff-first",
+        type=Path,
+        help="Write xxd-like report of differing blocks using only the first input's bytes",
+    )
+    ap.add_argument(
+        "--xxd-full-dir",
+        type=Path,
+        help="Directory to write full xxd-like dumps (<alias>.xxd) for each input",
+    )
+    ap.add_argument(
+        "--no-color", action="store_true", help="Disable ANSI color output (console)"
+    )
     ap.add_argument(
         "files", nargs="+", type=Path, help="Raw dumps for the chosen format"
     )
@@ -356,8 +574,6 @@ def main():
     to_sb = cfg["to_sector_block"]
 
     units = parse_units_arg(args.units)
-
-    # parse show/colorize
     show_cols = parse_show_arg(args.show)
     colorize_cols = parse_colorize_arg(args.colorize, show_cols)
 
@@ -392,7 +608,31 @@ def main():
 
     for i in diff_blocks:
         print_block_units(
-            i, datas, aliases, to_sb, units, use_color, show_cols, colorize_cols
+            i,
+            datas,
+            aliases,
+            to_sb,
+            units,
+            use_color,
+            show_cols,
+            colorize_cols,
+            args.show_same,
+        )
+
+    # xxd exports (read-only)
+    if args.xxd_full_dir:
+        write_xxd_full(args.xxd_full_dir, aliases, datas)
+        print(f"Wrote full xxd dumps to: {args.xxd_full_dir}/<alias>.xxd")
+    if args.xxd_diff:
+        write_xxd_diff(args.xxd_diff, fmt, aliases, datas, diff_blocks)
+        print(f"Wrote diff-only xxd report (all inputs) to: {args.xxd_diff}")
+    if args.xxd_diff_first:
+        # pass other datas to compute SAME mask
+        write_xxd_diff_first(
+            args.xxd_diff_first, fmt, aliases[0], datas[0], diff_blocks, datas[1:]
+        )
+        print(
+            f"Wrote diff-only xxd report (first input only) to: {args.xxd_diff_first}"
         )
 
 

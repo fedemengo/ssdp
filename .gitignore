@@ -1,5 +1,10 @@
 .DS_Store
 
+.claude/
+
 data/*.bin
+data/__laundry
 !data/imgs/
+
+__pycache__/
 

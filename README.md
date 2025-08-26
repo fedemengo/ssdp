@@ -1,108 +1,185 @@
-# ssdp
+# SSDP - Simple Stupid Dump Parser
 
-Stupid Simple Dumps Parser for binary dumps?
-- just for mifare 1k/4k dumps
+A Python CLI tool for comparing and analyzing binary dump files with unit-based analysis. Supports MIFARE Classic dumps and other binary formats with multi-byte unit comparison (2, 4, 8 byte units) and multiple data representations.
 
-## usage
+## Installation
 
-- the tools parse the content as N-bytes word (N = 2, 4, 8). N can be specified with `--units N`
-- it shows the block and units that are different across dumps
-- a couple of different visualization/encoding strategies are used for easier reverse engineering (`NOT = bitwise not, LE = little endian, BE = big endiand`)
+### From source
 
-From the above
-- identify which blocks hold relevant information
-- duplicate one dump
-- modify the content with the new data
-
-Let's take an hypothetical scenario in which we have two dumps for a mifare card obtained using a proxmark3. `dump2` was obtained right after adding `2` units of credits to the tag.
-- `dump1` with `1.5` unit of credits
-- `dump2` with `3.5` unit of credits
-
+```bash
+pip install -e .
 ```
-> ./main.py --units 4 --format mf1k --show NOT_RAW,INT_LE,NOT_LE --colorize INT_LE,NOT_LE \
-    data/dump1.bin data/dump2.bin
 
+### Development installation
+
+```bash
+pip install -e ".[dev]"
+```
+
+## Usage
+
+SSDP provides three main commands:
+
+### `ssdp diff` - Compare dump files
+
+Compare multiple dump files and show unit-level differences:
+
+```bash
+# Basic diff with default 2,4,8 byte units
+ssdp diff dump1.bin dump2.bin
+
+# MIFARE 1K format with sector/block labels
+ssdp diff dump1.bin dump2.bin --format mf1k
+
+# Custom unit sizes and representations
+ssdp diff dump1.bin dump2.bin --units 4,8 --show RAW,INT_LE,NOT_LE
+
+# Save diff context for later viewing
+ssdp diff dump1.bin dump2.bin --save-ctx diff.ctx
+
+# Export xxd-style reports
+ssdp diff dump1.bin dump2.bin --xxd-diff report.xxd
+```
+
+### `ssdp view` - Analyze single file
+
+View and analyze binary files with unit-based breakdown:
+
+```bash
+# View with unit analysis (default behavior)
+ssdp view dump.bin
+
+# View specific range
+ssdp view dump.bin --range 0x60:0x70
+
+# Use diff context to highlight changed units
+ssdp view new_dump.bin --ctx diff.ctx
+
+# Traditional xxd hex dump
+ssdp view dump.bin --xxd
+
+# Custom analysis
+ssdp view dump.bin --units 4 --show RAW,INT_LE,BIN --format mf1k
+```
+
+### `ssdp conv` - Convert between representations
+
+Convert values between different data representations:
+
+```bash
+# Convert value to all representations
+ssdp conv 0x1234ABCD 4
+
+# Convert from specific format
+ssdp conv "11110000" 1 --from BIN --to RAW,INT_LE
+
+# Output to file
+ssdp conv 12345 4 -o conversions.txt
+```
+
+## Data Representations
+
+SSDP supports multiple data representations for comprehensive analysis:
+
+- **RAW**: Hexadecimal bytes (e.g., `61 9A 79 2D`)
+- **INT_LE**: Little-endian signed integer (e.g., `762944097`)
+- **INT_BE**: Big-endian signed integer (e.g., `1637513517`)
+- **NOT_LE**: Little-endian bitwise NOT (e.g., `3532023198`)
+- **NOT_BE**: Big-endian bitwise NOT (e.g., `2657453778`)
+- **BIN**: Binary representation (e.g., `00101101011110011001101001100001`)
+- **BIN_NOT**: Binary bitwise NOT (e.g., `11010010100001100110010110011110`)
+- **NOT_RAW**: Hexadecimal bitwise NOT (e.g., `9E 65 86 D2`)
+
+## Example: MIFARE Classic Credit Analysis
+
+Let's analyze two MIFARE Classic dumps where 2 credits were added between dumps:
+
+```bash
+ssdp diff dump1.bin dump2.bin --format mf1k --units 4 --show RAW,INT_LE,NOT_LE
+```
+
+Output:
+```
 Inputs:
-  data01: data/dump1.bin
-  data02: data/dump2.bin
+  data01: dump1.bin
+  data02: dump2.bin
 
 Diff blocks:
-  S=1 B=2 (abs=6)
-  S=2 B=0 (abs=8)
-  S=2 B=1 (abs=9)
+  [BLOCK] ID=6 S=1 B=2
+  [BLOCK] ID=8 S=2 B=0
+  [BLOCK] ID=9 S=2 B=1
 
-[BLOCK] S=1 B=2 (abs=6)
-  [units=4]
-    data01: FULL=39 4A E2 32 | 00 00 00 00 | 00 00 00 00 | C3 01 00 07
-    data02: FULL=70 4A E2 32 | 00 00 00 00 | 00 00 00 00 | C4 01 00 15
-    +00
-      data01: RAW=39 4A E2 32 | NOT_RAW=C6 B5 1D CD | INT_LE= 853690937 | NOT_LE=3441276358
-      data02: RAW=70 4A E2 32 | NOT_RAW=8F B5 1D CD | INT_LE= 853690992 | NOT_LE=3441276303
-    +12
-      data01: RAW=C3 01 00 07 | NOT_RAW=3C FE FF F8 | INT_LE= 117440963 | NOT_LE=4177526332
-      data02: RAW=C4 01 00 15 | NOT_RAW=3B FE FF EA | INT_LE= 352321988 | NOT_LE=3942645307
-
-[BLOCK] S=2 B=0 (abs=8)
+[BLOCK] ID=8 S=2 B=0
   [units=4]
     data01: FULL=96 00 00 00 | 69 FF FF FF | 96 00 00 00 | 09 F6 09 F6
     data02: FULL=5E 01 00 00 | A1 FE FF FF | 5E 01 00 00 | 09 F6 09 F6
     +00
-      data01: RAW=96 00 00 00 | NOT_RAW=69 FF FF FF | INT_LE=       150 | NOT_LE=4294967145
-      data02: RAW=5E 01 00 00 | NOT_RAW=A1 FE FF FF | INT_LE=       350 | NOT_LE=4294966945
-    +04
-      data01: RAW=69 FF FF FF | NOT_RAW=96 00 00 00 | INT_LE=4294967145 | NOT_LE=       150
-      data02: RAW=A1 FE FF FF | NOT_RAW=5E 01 00 00 | INT_LE=4294966945 | NOT_LE=       350
-    +08
-      data01: RAW=96 00 00 00 | NOT_RAW=69 FF FF FF | INT_LE=       150 | NOT_LE=4294967145
-      data02: RAW=5E 01 00 00 | NOT_RAW=A1 FE FF FF | INT_LE=       350 | NOT_LE=4294966945
-
-[BLOCK] S=2 B=1 (abs=9)
-  [units=4]
-    data01: FULL=32 00 00 00 | CD FF FF FF | 32 00 00 00 | 09 F6 09 F6
-    data02: FULL=96 00 00 00 | 69 FF FF FF | 96 00 00 00 | 09 F6 09 F6
-    +00
-      data01: RAW=32 00 00 00 | NOT_RAW=CD FF FF FF | INT_LE=        50 | NOT_LE=4294967245
-      data02: RAW=96 00 00 00 | NOT_RAW=69 FF FF FF | INT_LE=       150 | NOT_LE=4294967145
-    +04
-      data01: RAW=CD FF FF FF | NOT_RAW=32 00 00 00 | INT_LE=4294967245 | NOT_LE=        50
-      data02: RAW=69 FF FF FF | NOT_RAW=96 00 00 00 | INT_LE=4294967145 | NOT_LE=       150
-    +08
-      data01: RAW=32 00 00 00 | NOT_RAW=CD FF FF FF | INT_LE=        50 | NOT_LE=4294967245
-      data02: RAW=96 00 00 00 | NOT_RAW=69 FF FF FF | INT_LE=       150 | NOT_LE=4294967145
+      data01: RAW=96 00 00 00 | INT_LE=       150 | NOT_LE=4294967145
+      data02: RAW=5E 01 00 00 | INT_LE=       350 | NOT_LE=4294966945
 ```
 
-From the output and what it's known about the credit on the tag, it's clear that
+From this output, we can see:
+- Block 8 contains current credit: 150 cents (1.50) → 350 cents (3.50)
+- The credit is stored in three locations: +00, +04 (bitwise NOT), +08 (duplicate)
+- NOT_LE representation shows the bitwise complement used for data integrity
 
-- `S1B2`: holds information that is not trivially related to the data
+### Writing New Credit Value
 
-- `S2B0` (`block8`):
-    - bytes `S2B0+00-04` contains the current credit in cents (`150` -> `1.5` for dump1, `350` -> `3.5` for dump2)
-    - bytes `S2B0+04-08` contains the current credit in cents (`150` -> `1.5` for dump1, `350` -> `3.5` for dump2) in bitwise not representation
-    - bytes `S2B0+08-12` contains the current credit in cents (`150` -> `1.5` for dump1, `350` -> `3.5` for dump2)
+To write 69.42 credits (6942 cents) to the card:
 
-- `S2B1` (`block9`):
-    - bytes `S2B1+00-04` contains the previous credit in cents (`50` -> `0.5` for dump1, `150` -> `1.5` for dump2)
-    - bytes `S2B1+04-08` contains the previous credit in cents (`50` -> `0.5` for dump1, `150` -> `1.5` for dump2) in bitwise not representation
-    - bytes `S2B1+08-12` contains the previous credit in cents (`50` -> `0.5` for dump1, `150` -> `1.5` for dump2)
-
-
-So, if one would want to write a new credit on the card, let's say `69.42` as a `4` bytes word, they would need to recover the byte representation of `6942` in `INT_LE` and `NOT_LE`, as follow
-
-```
-> ./conv.py 6942 4
-INT_BE : 00001b1e
-INT_LE : 1e1b0000
-NOT_BE : ffffe4e1
-NOT_LE : e1e4ffff
-NOT_RAW: ffff96bd
-RAW    : 00006942
+```bash
+ssdp conv 6942 4 --show RAW,INT_LE,NOT_LE
 ```
 
-and then write the block using proxmark pm3 `.. wrbl --blk BLOCKN -d [INT_LE][NOT_LE][INT_LE][FIXED_DATA] -k KEY`
-
+Output:
 ```
+RAW    : 1E 1B 00 00
+INT_LE : 6942
+NOT_LE : 4294960354
+```
+
+Use these values to construct the block data for Proxmark3:
+
+```bash
 [usb] pm3 --> hf mf wrbl --blk 8 -d 1e1b0000e1e4ffff1e1b000009f609f6 -k FFFFFFFFFFFF
-[usb] pm3 --> hf mf wrbl --blk 9 -d 1e1b0000e1e4ffff1e1b000009f609f6 -k FFFFFFFFFFFF
 ```
 
-this will set the current and previous credit to `69.42`
+## Diff Context Workflow
+
+Save analysis context and apply it to new files:
+
+```bash
+# Generate diff context
+ssdp diff original.bin modified.bin --save-ctx changes.ctx
+
+# Apply context to analyze a new file
+ssdp view new_file.bin --ctx changes.ctx
+```
+
+This shows only the units that differed in the original comparison, making it easy to focus on relevant changes.
+
+## Command Options
+
+### Common Options
+
+- `--units 2,4,8`: Unit sizes for analysis (default: 2,4,8)
+- `--show RAW,INT_LE,NOT_LE`: Columns to display (default: all)
+- `--colorize RAW,INT_LE`: Columns to colorize (default: RAW)
+- `--format mf1k|mf4k`: MIFARE format for sector/block labeling
+- `--block-size N`: Block size in bytes (default: 16)
+- `--no-color`: Disable color output
+
+### Diff-specific Options
+
+- `--show-same none|units|bytes|both`: Highlight identical data
+- `--xxd-diff FILE`: Export xxd-style diff report
+- `--xxd-full-dir DIR`: Export full xxd dumps
+- `--save-ctx FILE`: Save diff context for view command
+
+### View-specific Options
+
+- `--range 0x100:0x200`: View specific byte range
+- `--xxd`: Use traditional xxd hex dump format
+- `--ctx FILE`: Use diff context to show only changed units
+- `--json`: Output in JSON format (xxd mode only)
+

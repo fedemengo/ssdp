@@ -18,7 +18,7 @@ def main():
     ap.add_argument("--range", dest="range_opt", help="Range to view (start:end, e.g., 0x100:0x200)")
     ap.add_argument("--block-size", type=int, default=16, help="Block size in bytes")
     ap.add_argument("--format", choices=["mf1k", "mf4k"], help="Optional format for block labeling")
-    ap.add_argument("--units", help="Comma-separated list of unit sizes to display (subset of 2,4,8). Default: 2,4,8")
+    ap.add_argument("--units", help="Comma-separated list of unit sizes to display (subset of 1,2,4,8). Default: 2,4,8")
     ap.add_argument("--show", help="Comma-separated subset of columns to show from: RAW,INT_BE,INT_LE,NOT_BE,NOT_LE,BIN,BIN_NOT,NOT_RAW. Default: all")
     ap.add_argument("--colorize", help="Comma-separated list of columns to colorize: RAW and/or any shown columns. Default: RAW")
     ap.add_argument("--ctx", type=Path, help="Diff context file (generated with 'ssdp diff --save-ctx')")
@@ -268,14 +268,14 @@ def main():
                         display_block_idx, datas, aliases, format_labeler, units_list, use_color,
                         show_cols, colorize_cols, "none", args.block_size, 
                         force_show_all_units=False, differing_unit_offsets=differing_unit_offsets,
-                        data_block_idx=data_block_idx
+                        data_block_idx=data_block_idx, mark_diffs=True
                     )
                 else:
                     # Without diff context: show all units for comprehensive analysis
                     print_block_units(
                         display_block_idx, datas, aliases, format_labeler, units_list, use_color,
                         show_cols, colorize_cols, "none", args.block_size, force_show_all_units=True,
-                        data_block_idx=data_block_idx
+                        data_block_idx=data_block_idx, mark_diffs=True
                     )
         
     except Exception as e:

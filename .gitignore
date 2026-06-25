@@ -2,9 +2,12 @@
 
 .claude/
 
+*.egg-info/
+
 data/*.bin
 data/__laundry
 !data/imgs/
+build/
 
 __pycache__/
 

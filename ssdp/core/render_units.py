@@ -36,6 +36,7 @@ def print_block_units(
     force_show_all_units: bool = False,
     differing_unit_offsets: Optional[set] = None,
     data_block_idx: Optional[int] = None,
+    mark_diffs: bool = True,
 ):
     """Print block with correct format matching original."""
     # Set defaults
@@ -95,9 +96,11 @@ def print_block_units(
                     group_has_diff = j in differing_units
                     
                     group_str = " ".join(f"{b:02X}" for b in group)
-                    # Colorize if this unit differs (always colorize FULL if any colorization is enabled)
-                    if group_has_diff and use_color:
-                        group_str = colorize_token(group_str, colors[i], use_color)
+                    if group_has_diff:
+                        if use_color:
+                            group_str = colorize_token(group_str, colors[i], use_color)
+                        elif mark_diffs:
+                            group_str = f"[{group_str}]"
                     groups.append(group_str)
                 else:
                     # Pad if less than unit size
@@ -120,7 +123,8 @@ def print_block_units(
             is_in_diff_context = differing_unit_offsets and abs_offset in differing_unit_offsets
             
             if differs or force_show_all_units or is_in_diff_context:
-                print(f"    +{off:02d}")
+                prefix = "!" if (mark_diffs and not use_color and differs) else " "
+                print(f"    {prefix}+{off:02d}")
                 
                 # Get colors for each file
                 colors = [ANSI_COLORS[i % len(ANSI_COLORS)] for i in range(len(aliases))]
@@ -130,6 +134,8 @@ def print_block_units(
                     raw_str = hex_bytes(unit_data)
                     if "RAW" in colorize_cols:
                         raw_str = colorize_token(raw_str, colors[i], use_color)
+                    elif differs and mark_diffs and not use_color:
+                        raw_str = f"[{raw_str}]"
                     
                     parts = [f"RAW={raw_str}"]
                     
@@ -216,6 +222,6 @@ def print_block_units(
 # Helper functions from original
 def unit_offsets(size: int) -> List[int]:
     """Get byte offsets for units of given size within a 16-byte block."""
-    if size not in (2, 4, 8):
-        raise ValueError("invalid unit size; expected 2, 4, or 8")
+    if size not in (1, 2, 4, 8):
+        raise ValueError("invalid unit size; expected 1, 2, 4, or 8")
     return list(range(0, 16, size))

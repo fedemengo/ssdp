@@ -14,10 +14,10 @@ def parse_units_arg(units_arg: str | None) -> List[int]:
         parts = [p.strip() for p in units_arg.split(",") if p.strip()]
         units = [int(p) for p in parts]
     except ValueError:
-        raise ValueError("--units must be a comma-separated list of 2, 4, 8")
-    valid = {2, 4, 8}
+        raise ValueError("--units must be a comma-separated list of 1, 2, 4, 8")
+    valid = {1, 2, 4, 8}
     if any(u not in valid for u in units):
-        raise ValueError("--units values must be among {2,4,8}")
+        raise ValueError("--units values must be among {1,2,4,8}")
     return units
 
 

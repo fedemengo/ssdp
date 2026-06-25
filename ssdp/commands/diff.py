@@ -19,7 +19,7 @@ def main():
     )
     ap.add_argument(
         "--units",
-        help="Comma-separated list of unit sizes to display (subset of 2,4,8). Default: 2,4,8",
+        help="Comma-separated list of unit sizes to display (subset of 1,2,4,8). Default: 2,4,8",
     )
     ap.add_argument(
         "--show",
@@ -155,7 +155,8 @@ def main():
     for i in diff_blocks:
         print_block_units(
             i, datas, aliases, format_labeler, units_list, use_color,
-            show_cols, colorize_cols, args.show_same, args.block_size
+            show_cols, colorize_cols, args.show_same, args.block_size,
+            mark_diffs=True
         )
     
     # Handle xxd exports exactly like original

@@ -31,6 +31,12 @@ def main():
         help="Comma-separated list of columns to colorize: RAW and/or any shown columns. Default: RAW",
     )
     ap.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="When to emit ANSI color: auto, always, or never (default: auto)",
+    )
+    ap.add_argument(
         "--show-same",
         choices=["none", "units", "bytes", "both"],
         default="none",
@@ -52,7 +58,11 @@ def main():
         help="Directory to write full xxd-like dumps (<alias>.xxd) for each input",
     )
     ap.add_argument(
-        "--no-color", action="store_true", help="Disable ANSI color output (console)"
+        "--no-color",
+        action="store_const",
+        const="never",
+        dest="color",
+        help="Disable ANSI color output (same as --color=never)",
     )
     ap.add_argument(
         "--save-ctx", type=Path, help="Save diff context to file for use with 'ssdp view --ctx'"
@@ -109,7 +119,12 @@ def main():
         cfg = None
     
     # Parse arguments
-    from ..utils.cli import parse_units_arg, parse_show_arg, parse_colorize_arg
+    from ..utils.cli import (
+        parse_colorize_arg,
+        parse_show_arg,
+        parse_units_arg,
+        should_use_color,
+    )
     from ..core.render_units import format_block_ref, print_block_units
     
     try:
@@ -199,7 +214,7 @@ def main():
     print()
     
     # Print blocks exactly like original main.py
-    use_color = (not args.no_color) and sys.stdout.isatty()
+    use_color = should_use_color(args.color, sys.stdout.isatty())
     
     for i in diff_blocks:
         print_block_units(

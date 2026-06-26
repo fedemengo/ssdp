@@ -175,9 +175,10 @@ This shows only the units that differed in the original comparison, making it ea
 - `--units 1,2,4,8`: Unit sizes for analysis (default: 2,4,8; MIFARE formats default to 4)
 - `--show RAW,INT_LE,NOT_LE`: Columns to display (default: all)
 - `--colorize RAW,INT_LE`: Columns to colorize (default: RAW)
+- `--color auto|always|never`: Control ANSI color output (default: auto)
 - `--format mf1k|mf4k|mf1k[value]|mf4k[value]`: MIFARE sector/block labeling and value block annotations; `[value]` shows only valid value blocks
 - `--block-size N`: Block size in bytes (default: 16)
-- `--no-color`: Disable color output
+- `--no-color`: Disable color output (same as `--color never`)
 
 ### Diff-specific Options
 

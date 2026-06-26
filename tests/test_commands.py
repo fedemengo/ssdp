@@ -59,6 +59,38 @@ class TestGenericDiff:
                 assert ctx_data["format"] is None
                 assert "2" in ctx_data["diff_units"]
 
+    def test_color_always_emits_ansi_when_stdout_is_not_tty(self):
+        data1 = b"\x00" * 16
+        data2 = b"\x01" * 16
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file1 = Path(tmpdir) / "file1.bin"
+            file2 = Path(tmpdir) / "file2.bin"
+            file1.write_bytes(data1)
+            file2.write_bytes(data2)
+
+            test_argv = [
+                "ssdp diff",
+                "--units",
+                "4",
+                "--color",
+                "always",
+                str(file1),
+                str(file2),
+            ]
+
+            with patch.object(sys, "argv", test_argv):
+                from ssdp.commands.diff import main
+
+                captured_output = StringIO()
+                with patch("sys.stdout", captured_output):
+                    try:
+                        main()
+                    except SystemExit:
+                        pass
+
+                assert "\033[" in captured_output.getvalue()
+
 
 class TestDiffMifareFormat:
     """Test MIFARE annotations and filtering in diff command."""
@@ -343,3 +375,35 @@ class TestViewMifareFormat:
                 output = captured_output.getvalue()
                 assert "[units=8]" in output
                 assert "[units=4]" not in output
+
+
+class TestViewColor:
+    """Test color mode handling in view command."""
+
+    def test_color_always_emits_ansi_when_stdout_is_not_tty(self):
+        data = b"\x00" * 16
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_file = Path(tmpdir) / "data.bin"
+            data_file.write_bytes(data)
+
+            test_argv = [
+                "ssdp view",
+                str(data_file),
+                "--units",
+                "4",
+                "--color",
+                "always",
+            ]
+
+            with patch.object(sys, "argv", test_argv):
+                from ssdp.commands.view import main
+
+                captured_output = StringIO()
+                with patch("sys.stdout", captured_output):
+                    try:
+                        main()
+                    except SystemExit:
+                        pass
+
+                assert "\033[" in captured_output.getvalue()

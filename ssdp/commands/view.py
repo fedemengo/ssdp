@@ -26,7 +26,19 @@ def main():
     ap.add_argument("--show", help="Comma-separated subset of columns to show from: RAW,INT_BE,INT_LE,NOT_BE,NOT_LE,BIN,BIN_NOT,NOT_RAW. Default: all")
     ap.add_argument("--colorize", help="Comma-separated list of columns to colorize: RAW and/or any shown columns. Default: RAW")
     ap.add_argument("--ctx", type=Path, help="Diff context file (generated with 'ssdp diff --save-ctx')")
-    ap.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
+    ap.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="When to emit ANSI color: auto, always, or never (default: auto)",
+    )
+    ap.add_argument(
+        "--no-color",
+        action="store_const",
+        const="never",
+        dest="color",
+        help="Disable ANSI color output (same as --color=never)",
+    )
     ap.add_argument("--output", "-o", type=Path, help="Output file (stdout if not specified)")
     args = ap.parse_args()
     
@@ -102,6 +114,8 @@ def main():
             print(json.dumps(json_obj, separators=(',', ':')))
             
         elif args.xxd:
+            from ..utils.cli import should_use_color
+
             # Load diff context for highlighting if provided
             diff_units = {}
             if args.ctx:
@@ -138,7 +152,8 @@ def main():
                 for i in range(unit_size):
                     byte_to_unit[offset + i] = unit_key
             
-            RESET = "\033[0m" if sys.stdout.isatty() and byte_to_unit else ""
+            use_color = should_use_color(args.color, sys.stdout.isatty())
+            RESET = "\033[0m" if use_color and byte_to_unit else ""
             
             # xxd format with optional highlighting
             for i in range(0, len(view_data), 16):
@@ -154,7 +169,7 @@ def main():
                         hex_bytes = []
                         for k, b in enumerate(group):
                             byte_offset = offset + group_start + k
-                            if byte_offset in byte_to_unit:
+                            if use_color and byte_offset in byte_to_unit:
                                 unit_key = byte_to_unit[byte_offset]
                                 color = unit_to_color[unit_key]
                                 hex_bytes.append(f"{color}{b:02x}{RESET}")
@@ -170,7 +185,7 @@ def main():
                 for k, b in enumerate(chunk):
                     byte_offset = offset + k
                     ch = chr(b) if 32 <= b <= 126 else "."
-                    if byte_offset in byte_to_unit:
+                    if use_color and byte_offset in byte_to_unit:
                         unit_key = byte_to_unit[byte_offset]
                         color = unit_to_color[unit_key]
                         ascii_chars.append(f"{color}{ch}{RESET}")
@@ -183,7 +198,12 @@ def main():
         
         else:
             # Default: Unit-based analysis like diff command
-            from ..utils.cli import parse_units_arg, parse_show_arg, parse_colorize_arg
+            from ..utils.cli import (
+                parse_colorize_arg,
+                parse_show_arg,
+                parse_units_arg,
+                should_use_color,
+            )
             from ..core.render_units import print_block_units
             
             # Optional format-specific validation, labeling, and annotations
@@ -255,7 +275,7 @@ def main():
             
             # Calculate blocks 
             total_blocks = (len(view_data) + args.block_size - 1) // args.block_size
-            use_color = (not args.no_color) and sys.stdout.isatty()
+            use_color = should_use_color(args.color, sys.stdout.isatty())
             max_block_idx = max(total_blocks - 1, 0)
             if chip_format in {"mf1k", "mf4k"}:
                 try:

@@ -46,3 +46,14 @@ def parse_colorize_arg(colorize_arg: str | None, show_cols: List[str]) -> List[s
     if invalid:
         raise ValueError(f"--colorize references columns not in --show: {', '.join(invalid)}")
     return parts
+
+
+def should_use_color(color_mode: str, is_tty: bool) -> bool:
+    """Resolve color output mode to a concrete boolean."""
+    if color_mode == "always":
+        return True
+    if color_mode == "never":
+        return False
+    if color_mode == "auto":
+        return is_tty
+    raise ValueError("--color must be one of: auto, always, never")

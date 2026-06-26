@@ -18,6 +18,12 @@ ANSI_COLORS = [
 ANSI_RESET = "\033[0m"
 
 
+def format_block_ref(abs_block: int, decimal_width: int = 0, hex_width: int = 2) -> str:
+    """Format an absolute block reference with stable column widths."""
+    decimal = f"{abs_block:0{decimal_width}d}" if decimal_width > 0 else str(abs_block)
+    return f"abs={decimal} (0x{abs_block:0{hex_width}X})"
+
+
 def colorize_token(token: str, color: str, enable: bool) -> str:
     """Apply ANSI color to a token if enabled."""
     return f"{color}{token}{ANSI_RESET}" if enable else token
@@ -37,6 +43,9 @@ def print_block_units(
     differing_unit_offsets: Optional[set] = None,
     data_block_idx: Optional[int] = None,
     mark_diffs: bool = True,
+    block_notes: Optional[List[str]] = None,
+    block_index_width: int = 0,
+    block_hex_width: int = 2,
 ):
     """Print block with correct format matching original."""
     # Set defaults
@@ -50,17 +59,22 @@ def print_block_units(
     # Print block header with color
     header_color = "\033[1;33m"  # Bold yellow
     reset = "\033[0m"
+    block_ref = format_block_ref(abs_block, block_index_width, block_hex_width)
     
     if to_sector_block:
         s, b = to_sector_block(abs_block)
-        header = f"[BLOCK] ID={abs_block} S={s} B={b}"
+        header = f"[BLOCK] {block_ref} sec={s} blk={b}"
     else:
-        header = f"[BLOCK] ID={abs_block}"
+        header = f"[BLOCK] {block_ref}"
     
     if use_color:
         print(f"{header_color}{header}{reset}")
     else:
         print(header)
+
+    if block_notes:
+        for note in block_notes:
+            print(f"  {note}")
 
     # Use data_block_idx for data access if provided, otherwise use abs_block
     actual_block_idx = data_block_idx if data_block_idx is not None else abs_block

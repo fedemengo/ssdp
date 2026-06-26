@@ -31,6 +31,9 @@ ssdp diff dump1.bin dump2.bin
 # MIFARE 1K format with sector/block labels
 ssdp diff dump1.bin dump2.bin --format mf1k
 
+# MIFARE 1K, only differing value blocks
+ssdp diff dump1.bin dump2.bin --format 'mf1k[value]'
+
 # Custom unit sizes and representations
 ssdp diff dump1.bin dump2.bin --units 4,8 --show RAW,INT_LE,NOT_LE
 
@@ -54,6 +57,12 @@ ssdp view dump.bin --range 0x60:0x70
 
 # Use diff context to highlight changed units
 ssdp view new_dump.bin --ctx diff.ctx
+
+# Detect MIFARE Classic value blocks while showing all blocks
+ssdp view dump.bin --format mf1k
+
+# Show only valid MIFARE Classic value blocks
+ssdp view dump.bin --format 'mf1k[value]'
 
 # Traditional xxd hex dump
 ssdp view dump.bin --xxd
@@ -105,11 +114,12 @@ Inputs:
   data02: dump2.bin
 
 Diff blocks:
-  [BLOCK] ID=6 S=1 B=2
-  [BLOCK] ID=8 S=2 B=0
-  [BLOCK] ID=9 S=2 B=1
+  MIFARE: sec=sector, blk=block within sector
+  [BLOCK] abs=06 (0x06) sec=1 blk=2
+  [BLOCK] abs=08 (0x08) sec=2 blk=0
+  [BLOCK] abs=09 (0x09) sec=2 blk=1
 
-[BLOCK] ID=8 S=2 B=0
+[BLOCK] abs=08 (0x08) sec=2 blk=0
   [units=4]
     data01: FULL=96 00 00 00 | 69 FF FF FF | 96 00 00 00 | 09 F6 09 F6
     data02: FULL=5E 01 00 00 | A1 FE FF FF | 5E 01 00 00 | 09 F6 09 F6
@@ -162,10 +172,10 @@ This shows only the units that differed in the original comparison, making it ea
 
 ### Common Options
 
-- `--units 2,4,8`: Unit sizes for analysis (default: 2,4,8)
+- `--units 1,2,4,8`: Unit sizes for analysis (default: 2,4,8; MIFARE formats default to 4)
 - `--show RAW,INT_LE,NOT_LE`: Columns to display (default: all)
 - `--colorize RAW,INT_LE`: Columns to colorize (default: RAW)
-- `--format mf1k|mf4k`: MIFARE format for sector/block labeling
+- `--format mf1k|mf4k|mf1k[value]|mf4k[value]`: MIFARE sector/block labeling and value block annotations; `[value]` shows only valid value blocks
 - `--block-size N`: Block size in bytes (default: 16)
 - `--no-color`: Disable color output
 
@@ -182,4 +192,3 @@ This shows only the units that differed in the original comparison, making it ea
 - `--xxd`: Use traditional xxd hex dump format
 - `--ctx FILE`: Use diff context to show only changed units
 - `--json`: Output in JSON format (xxd mode only)
-

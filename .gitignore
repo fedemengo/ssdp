@@ -5,9 +5,13 @@
 *.egg-info/
 
 data/*.bin
+data/*.ctx
+data/*.diff
 data/__laundry
 !data/imgs/
 build/
+
+.egg-info/
 
 __pycache__/
 

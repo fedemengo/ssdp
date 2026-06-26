@@ -48,7 +48,7 @@ class TestGenericDiff:
                 output = captured_output.getvalue()
                 
                 # Should show generic block labeling
-                assert "[BLOCK] ID=" in output
+                assert "[BLOCK] abs=" in output
                 
                 # Context file should be created
                 assert ctx_file.exists()
@@ -58,6 +58,74 @@ class TestGenericDiff:
                 assert ctx_data["block_size"] == 16
                 assert ctx_data["format"] is None
                 assert "2" in ctx_data["diff_units"]
+
+
+class TestDiffMifareFormat:
+    """Test MIFARE annotations and filtering in diff command."""
+
+    def test_mifare_diff_defaults_to_four_byte_units(self):
+        data1 = bytes.fromhex("87 D6 12 00 78 29 ED FF 87 D6 12 00 11 EE 11 EE")
+        data2 = bytes.fromhex("88 D6 12 00 77 29 ED FF 88 D6 12 00 11 EE 11 EE")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file1 = Path(tmpdir) / "file1.bin"
+            file2 = Path(tmpdir) / "file2.bin"
+            file1.write_bytes(data1)
+            file2.write_bytes(data2)
+
+            test_argv = ["ssdp diff", "--format", "mf1k", str(file1), str(file2)]
+
+            with patch.object(sys, "argv", test_argv):
+                from ssdp.commands.diff import main
+
+                captured_output = StringIO()
+                with patch("sys.stdout", captured_output):
+                    try:
+                        main()
+                    except SystemExit:
+                        pass
+
+                output = captured_output.getvalue()
+                assert "[MIFARE VALUE] value=1234567 adr=17 (0x11)" in output
+                assert "[MIFARE VALUE] value=1234568 adr=17 (0x11)" in output
+                assert "[units=4]" in output
+                assert "[units=2]" not in output
+                assert "[units=8]" not in output
+
+    def test_mifare_value_filter_hides_non_value_diff_blocks(self):
+        value1 = bytes.fromhex("87 D6 12 00 78 29 ED FF 87 D6 12 00 11 EE 11 EE")
+        value2 = bytes.fromhex("88 D6 12 00 77 29 ED FF 88 D6 12 00 11 EE 11 EE")
+        data1 = (b"\x00" * 16) + value1
+        data2 = (b"\x01" * 16) + value2
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file1 = Path(tmpdir) / "file1.bin"
+            file2 = Path(tmpdir) / "file2.bin"
+            file1.write_bytes(data1)
+            file2.write_bytes(data2)
+
+            test_argv = [
+                "ssdp diff",
+                "--format",
+                "mf1k[value]",
+                str(file1),
+                str(file2),
+            ]
+
+            with patch.object(sys, "argv", test_argv):
+                from ssdp.commands.diff import main
+
+                captured_output = StringIO()
+                with patch("sys.stdout", captured_output):
+                    try:
+                        main()
+                    except SystemExit:
+                        pass
+
+                output = captured_output.getvalue()
+                assert "[BLOCK] abs=00 (0x00)" not in output
+                assert "[BLOCK] abs=01 (0x01) sec=0 blk=1" in output
+                assert "[MIFARE VALUE] value=1234567 adr=17 (0x11)" in output
 
 
 class TestViewUnitsFilter:
@@ -146,3 +214,132 @@ class TestViewUnitsFilter:
                 # Should warn about missing unit sizes
                 assert "warning: unit size 2 not found" in stderr_output
                 assert "warning: unit size 8 not found" in stderr_output
+
+
+class TestViewMifareFormat:
+    """Test MIFARE annotations in view command."""
+
+    def test_mifare_value_block_annotation(self):
+        data = bytes.fromhex("87 D6 12 00 78 29 ED FF 87 D6 12 00 11 EE 11 EE")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_file = Path(tmpdir) / "data.bin"
+            data_file.write_bytes(data)
+
+            test_argv = [
+                "ssdp view",
+                str(data_file),
+                "--format",
+                "mf1k",
+                "--units",
+                "4",
+                "--show",
+                "RAW,INT_LE",
+            ]
+
+            with patch.object(sys, "argv", test_argv):
+                from ssdp.commands.view import main
+
+                captured_output = StringIO()
+                with patch("sys.stdout", captured_output):
+                    try:
+                        main()
+                    except SystemExit:
+                        pass
+
+                output = captured_output.getvalue()
+                assert "[MIFARE VALUE] value=1234567 adr=17 (0x11)" in output
+
+    def test_mifare_value_filter_hides_non_value_blocks(self):
+        value_block = bytes.fromhex("87 D6 12 00 78 29 ED FF 87 D6 12 00 11 EE 11 EE")
+        data = (b"\x00" * 16) + value_block
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_file = Path(tmpdir) / "data.bin"
+            data_file.write_bytes(data)
+
+            test_argv = [
+                "ssdp view",
+                str(data_file),
+                "--format",
+                "mf1k[value]",
+                "--units",
+                "4",
+                "--show",
+                "RAW,INT_LE",
+            ]
+
+            with patch.object(sys, "argv", test_argv):
+                from ssdp.commands.view import main
+
+                captured_output = StringIO()
+                with patch("sys.stdout", captured_output):
+                    try:
+                        main()
+                    except SystemExit:
+                        pass
+
+                output = captured_output.getvalue()
+                assert "[BLOCK] abs=00 (0x00)" not in output
+                assert "MIFARE: sec=sector, blk=block within sector" in output
+                assert "[BLOCK] abs=01 (0x01) sec=0 blk=1" in output
+                assert "[MIFARE VALUE] value=1234567 adr=17 (0x11)" in output
+
+    def test_mifare_defaults_to_four_byte_units(self):
+        data = bytes.fromhex("87 D6 12 00 78 29 ED FF 87 D6 12 00 11 EE 11 EE")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_file = Path(tmpdir) / "data.bin"
+            data_file.write_bytes(data)
+
+            test_argv = [
+                "ssdp view",
+                str(data_file),
+                "--format",
+                "mf1k[value]",
+            ]
+
+            with patch.object(sys, "argv", test_argv):
+                from ssdp.commands.view import main
+
+                captured_output = StringIO()
+                with patch("sys.stdout", captured_output):
+                    try:
+                        main()
+                    except SystemExit:
+                        pass
+
+                output = captured_output.getvalue()
+                assert "[units=4]" in output
+                assert "[units=2]" not in output
+                assert "[units=8]" not in output
+
+    def test_explicit_units_override_mifare_default(self):
+        data = bytes.fromhex("87 D6 12 00 78 29 ED FF 87 D6 12 00 11 EE 11 EE")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_file = Path(tmpdir) / "data.bin"
+            data_file.write_bytes(data)
+
+            test_argv = [
+                "ssdp view",
+                str(data_file),
+                "--format",
+                "mf1k[value]",
+                "--units",
+                "8",
+            ]
+
+            with patch.object(sys, "argv", test_argv):
+                from ssdp.commands.view import main
+
+                captured_output = StringIO()
+                with patch("sys.stdout", captured_output):
+                    try:
+                        main()
+                    except SystemExit:
+                        pass
+
+                output = captured_output.getvalue()
+                assert "[units=8]" in output
+                assert "[units=4]" not in output

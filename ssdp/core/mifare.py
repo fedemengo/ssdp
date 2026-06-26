@@ -105,3 +105,27 @@ def validate_file_size(file_size: int, chip_type: str) -> None:
             f"File size {file_size} doesn't match expected size {config.total_bytes} "
             f"for chip type {chip_type}"
         )
+
+
+def parse_format_filter(format_arg: str | None) -> tuple[str | None, str | None]:
+    """Parse a MIFARE format with an optional block-type filter."""
+    if format_arg is None:
+        return None, None
+
+    if "[" not in format_arg:
+        if format_arg not in {"mf1k", "mf4k"}:
+            raise ValueError(
+                "--format must be one of: mf1k, mf4k, mf1k[value], mf4k[value]"
+            )
+        return format_arg, None
+
+    if not format_arg.endswith("]") or format_arg.count("[") != 1:
+        raise ValueError("--format filter must use the form mf1k[value] or mf4k[value]")
+
+    chip_format, filter_name = format_arg[:-1].split("[", 1)
+    if chip_format not in {"mf1k", "mf4k"}:
+        raise ValueError("--format must start with mf1k or mf4k")
+    if filter_name not in {"value", "value-block", "value_block"}:
+        raise ValueError("--format filter must be one of: value")
+
+    return chip_format, "value"

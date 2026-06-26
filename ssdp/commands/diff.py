@@ -6,16 +6,17 @@ from pathlib import Path
 from typing import List, Optional
 
 def main():
-    """Compare binary dumps at 2/4/8-byte units."""
+    """Compare binary dumps at unit boundaries."""
     
     ap = argparse.ArgumentParser(
-        description="Compare binary dumps at 2/4/8-byte units"
+        description="Compare binary dumps at unit boundaries"
     )
     ap.add_argument(
         "--block-size", type=int, default=16, help="Block size in bytes (default: 16)"
     )
     ap.add_argument(
-        "--format", choices=["mf1k", "mf4k"], help="Optional format for additional block labeling"
+        "--format",
+        help="Optional format for block labeling/annotations: mf1k, mf4k, mf1k[value], mf4k[value]",
     )
     ap.add_argument(
         "--units",
@@ -78,6 +79,14 @@ def main():
     # Use the first file's size as reference
     total_bytes = len(datas[0])
     total_blocks = (total_bytes + args.block_size - 1) // args.block_size  # Ceiling division
+
+    try:
+        from ..core.mifare import parse_format_filter
+
+        chip_format, block_filter = parse_format_filter(args.format)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
     
     # Validate all files have same size
     bad = [(n, len(d)) for n, d in zip(names, datas) if len(d) != total_bytes]
@@ -87,21 +96,25 @@ def main():
         sys.exit(2)
     
     # Optional format-specific validation
-    if args.format:
+    if chip_format:
         from ..core.mifare import get_chip_config
         try:
-            cfg = get_chip_config(args.format)
+            cfg = get_chip_config(chip_format)
             if total_bytes != cfg.total_bytes:
-                print(f"warning: file size {total_bytes} doesn't match {args.format} expected size {cfg.total_bytes}", file=sys.stderr)
+                print(f"warning: file size {total_bytes} doesn't match {chip_format} expected size {cfg.total_bytes}", file=sys.stderr)
         except Exception as e:
             print(f"warning: format validation failed: {e}", file=sys.stderr)
+            cfg = None
+    else:
+        cfg = None
     
     # Parse arguments
     from ..utils.cli import parse_units_arg, parse_show_arg, parse_colorize_arg
-    from ..core.render_units import print_block_units
+    from ..core.render_units import format_block_ref, print_block_units
     
     try:
-        units_list = parse_units_arg(args.units)
+        default_units = "4" if chip_format in {"mf1k", "mf4k"} else None
+        units_list = parse_units_arg(args.units or default_units)
         show_cols = parse_show_arg(args.show)  
         colorize_cols = parse_colorize_arg(args.colorize, show_cols)
     except:
@@ -122,31 +135,67 @@ def main():
     # Find differing blocks
     from ..core.diff_engine import blocks_that_differ
     diff_blocks = blocks_that_differ(datas, total_blocks)
-    
-    if not diff_blocks:
-        print("No differing blocks.")
-        return
         
-    print("Diff blocks:")
-    
     # Optional format-specific labeling
     format_labeler = None
-    if args.format:
+    if chip_format:
         try:
             from ..core.mifare import get_sector_block_mapper
-            format_labeler = get_sector_block_mapper(args.format)
+            format_labeler = get_sector_block_mapper(chip_format)
         except Exception:
             format_labeler = None
+
+    detect_mifare_values = chip_format in {"mf1k", "mf4k"}
+    only_value_blocks = block_filter == "value"
+    value_block_notes: dict[int, list[str]] = {}
+    if detect_mifare_values:
+        from ..core.mifare_value import detect_value_block
+
+        filtered_diff_blocks = []
+        for block_idx in diff_blocks:
+            block_start = block_idx * args.block_size
+            notes = []
+            for alias, data in zip(aliases, datas):
+                block_bytes = data[block_start:block_start + args.block_size]
+                value_block = detect_value_block(block_bytes)
+                if value_block is not None:
+                    notes.append(
+                        f"{alias}: [MIFARE VALUE] value={value_block.value} adr={value_block.address} (0x{value_block.address:02X})"
+                    )
+
+            if notes:
+                value_block_notes[block_idx] = notes
+            if not only_value_blocks or notes:
+                filtered_diff_blocks.append(block_idx)
+        diff_blocks = filtered_diff_blocks
+    
+    if not diff_blocks:
+        if only_value_blocks:
+            print("No differing value blocks.")
+        else:
+            print("No differing blocks.")
+        return
+
+    print("Diff blocks:")
+    if format_labeler:
+        print("  MIFARE: sec=sector, blk=block within sector")
+
+    max_block_idx = max(total_blocks - 1, 0)
+    if cfg is not None:
+        max_block_idx = cfg.total_blocks - 1
+    decimal_width = len(str(max_block_idx))
+    hex_width = max(2, len(f"{max_block_idx:X}"))
     
     for i in diff_blocks:
+        block_ref = format_block_ref(i, decimal_width, hex_width)
         if format_labeler:
             try:
                 s, b = format_labeler(i)
-                print(f"  [BLOCK] ID={i} S={s} B={b}")
+                print(f"  [BLOCK] {block_ref} sec={s} blk={b}")
             except Exception:
-                print(f"  [BLOCK] ID={i}")
+                print(f"  [BLOCK] {block_ref}")
         else:
-            print(f"  [BLOCK] ID={i}")
+            print(f"  [BLOCK] {block_ref}")
     print()
     
     # Print blocks exactly like original main.py
@@ -156,7 +205,8 @@ def main():
         print_block_units(
             i, datas, aliases, format_labeler, units_list, use_color,
             show_cols, colorize_cols, args.show_same, args.block_size,
-            mark_diffs=True
+            mark_diffs=True, block_notes=value_block_notes.get(i),
+            block_index_width=decimal_width, block_hex_width=hex_width
         )
     
     # Handle xxd exports exactly like original
@@ -195,7 +245,7 @@ def main():
         # Create context data with differing unit positions
         ctx_data = {
             "block_size": args.block_size,
-            "format": args.format,  # Optional, may be None
+            "format": chip_format,  # Optional, may be None
             "files": names,
             "aliases": {alias: name for alias, name in zip(aliases, names)},
             "units": units_list,  # The unit sizes that were analyzed

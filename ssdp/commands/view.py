@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+
 def main():
     """View a binary file with optional annotations."""
     
@@ -17,7 +18,10 @@ def main():
     ap.add_argument("--len", dest="length", type=int, help="Length to read (bytes)")
     ap.add_argument("--range", dest="range_opt", help="Range to view (start:end, e.g., 0x100:0x200)")
     ap.add_argument("--block-size", type=int, default=16, help="Block size in bytes")
-    ap.add_argument("--format", choices=["mf1k", "mf4k"], help="Optional format for block labeling")
+    ap.add_argument(
+        "--format",
+        help="Optional format for block labeling/annotations: mf1k, mf4k, mf1k[value], mf4k[value]",
+    )
     ap.add_argument("--units", help="Comma-separated list of unit sizes to display (subset of 1,2,4,8). Default: 2,4,8")
     ap.add_argument("--show", help="Comma-separated subset of columns to show from: RAW,INT_BE,INT_LE,NOT_BE,NOT_LE,BIN,BIN_NOT,NOT_RAW. Default: all")
     ap.add_argument("--colorize", help="Comma-separated list of columns to colorize: RAW and/or any shown columns. Default: RAW")
@@ -182,24 +186,36 @@ def main():
             from ..utils.cli import parse_units_arg, parse_show_arg, parse_colorize_arg
             from ..core.render_units import print_block_units
             
-            # Parse arguments
+            # Optional format-specific validation, labeling, and annotations
+            format_labeler = None
             try:
-                units_list = parse_units_arg(args.units)
+                from ..core.mifare import parse_format_filter
+
+                chip_format, block_filter = parse_format_filter(args.format)
+            except ValueError as e:
+                print(f"error: {e}", file=sys.stderr)
+                sys.exit(2)
+            detect_mifare_values = chip_format in {"mf1k", "mf4k"}
+            only_value_blocks = block_filter == "value"
+
+            # Parse arguments. MIFARE value blocks are organized as 4-byte value
+            # fields, so prefer that view unless the caller explicitly asks.
+            try:
+                default_units = "4" if chip_format in {"mf1k", "mf4k"} else None
+                units_list = parse_units_arg(args.units or default_units)
                 show_cols = parse_show_arg(args.show)
                 colorize_cols = parse_colorize_arg(args.colorize, show_cols)
             except Exception as e:
                 print(f"error: {e}", file=sys.stderr)
                 sys.exit(2)
-            
-            # Optional format-specific validation and labeling
-            format_labeler = None
-            if args.format:
+
+            if chip_format in {"mf1k", "mf4k"}:
                 try:
                     from ..core.mifare import get_chip_config, get_sector_block_mapper
-                    cfg = get_chip_config(args.format)
+                    cfg = get_chip_config(chip_format)
                     if len(view_data) % cfg.total_bytes != 0:
-                        print(f"warning: file size {len(view_data)} doesn't align with {args.format} block structure", file=sys.stderr)
-                    format_labeler = get_sector_block_mapper(args.format)
+                        print(f"warning: file size {len(view_data)} doesn't align with {chip_format} block structure", file=sys.stderr)
+                    format_labeler = get_sector_block_mapper(chip_format)
                 except Exception as e:
                     print(f"warning: format setup failed: {e}", file=sys.stderr)
             
@@ -218,25 +234,45 @@ def main():
                     for block_info in diff_blocks:
                         differing_blocks.add(block_info["abs_block"])
                     
-                    # Extract all differing unit offsets from diff_units
+                    # Extract differing unit offsets from requested unit sizes only.
                     differing_unit_offsets = set()
                     diff_units = ctx_data.get("diff_units", {})
-                    for unit_size_str, units in diff_units.items():
+                    found_unit_sizes = []
+                    for unit_size in units_list:
+                        unit_size_str = str(unit_size)
+                        units = diff_units.get(unit_size_str)
+                        if units is None:
+                            print(f"warning: unit size {unit_size} not found in context", file=sys.stderr)
+                            continue
+                        found_unit_sizes.append(unit_size_str)
                         for unit_info in units:
                             differing_unit_offsets.add(unit_info["offset"])
                     
-                    print(f"Loaded diff context: {len(differing_blocks)} differing blocks, {len(differing_unit_offsets)} differing units", file=sys.stderr)
+                    sizes = ",".join(found_unit_sizes) if found_unit_sizes else "none"
+                    print(f"Loaded diff context: {len(differing_blocks)} differing blocks, {len(differing_unit_offsets)} differing units (sizes: {sizes})", file=sys.stderr)
                 except Exception as e:
                     print(f"warning: could not load context file: {e}", file=sys.stderr)
             
             # Calculate blocks 
             total_blocks = (len(view_data) + args.block_size - 1) // args.block_size
             use_color = (not args.no_color) and sys.stdout.isatty()
+            max_block_idx = max(total_blocks - 1, 0)
+            if chip_format in {"mf1k", "mf4k"}:
+                try:
+                    from ..core.mifare import get_chip_config
+
+                    max_block_idx = get_chip_config(chip_format).total_blocks - 1
+                except Exception:
+                    pass
+            block_index_width = len(str(max_block_idx))
+            block_hex_width = max(2, len(f"{max_block_idx:X}"))
             
             print(f"File: {args.path}")
             print(f"Size: {len(view_data)} bytes ({total_blocks} blocks of {args.block_size} bytes)")
             if start_offset > 0:
                 print(f"Range: {start_offset:08x}-{start_offset + len(view_data) - 1:08x}")
+            if format_labeler:
+                print("MIFARE: sec=sector, blk=block within sector")
             print()
             
             # Create a single "file" for the view data
@@ -258,9 +294,25 @@ def main():
                     continue
                 
                 # But for data access, use the relative block index within view_data
-                display_block_idx = abs_block_idx  # What to show in [BLOCK] ID=X
+                display_block_idx = abs_block_idx  # Absolute block number to display.
                 data_block_idx = block_idx  # Index for accessing data within view_data
                 
+                # Determine MIFARE annotations and optional block filters.
+                block_notes = []
+                value_block = None
+                if detect_mifare_values:
+                    from ..core.mifare_value import detect_value_block
+
+                    block_bytes = view_data[block_start:block_start + args.block_size]
+                    value_block = detect_value_block(block_bytes)
+                    if value_block is not None:
+                        block_notes.append(
+                            f"[MIFARE VALUE] value={value_block.value} adr={value_block.address} (0x{value_block.address:02X})"
+                        )
+
+                if only_value_blocks and value_block is None:
+                    continue
+
                 # Determine which units to show based on context
                 if differing_unit_offsets:
                     # With diff context: only show units that were different
@@ -268,14 +320,18 @@ def main():
                         display_block_idx, datas, aliases, format_labeler, units_list, use_color,
                         show_cols, colorize_cols, "none", args.block_size, 
                         force_show_all_units=False, differing_unit_offsets=differing_unit_offsets,
-                        data_block_idx=data_block_idx, mark_diffs=True
+                        data_block_idx=data_block_idx, block_notes=block_notes,
+                        mark_diffs=True, block_index_width=block_index_width,
+                        block_hex_width=block_hex_width
                     )
                 else:
                     # Without diff context: show all units for comprehensive analysis
                     print_block_units(
                         display_block_idx, datas, aliases, format_labeler, units_list, use_color,
                         show_cols, colorize_cols, "none", args.block_size, force_show_all_units=True,
-                        data_block_idx=data_block_idx, mark_diffs=True
+                        data_block_idx=data_block_idx, block_notes=block_notes,
+                        mark_diffs=True, block_index_width=block_index_width,
+                        block_hex_width=block_hex_width
                     )
         
     except Exception as e:

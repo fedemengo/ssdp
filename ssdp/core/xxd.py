@@ -121,7 +121,7 @@ def xxd_diff_block(
     lines: List[str] = []
     
     # Block header
-    lines.append(f"[BLOCK] S={sector} B={block_index} (abs={abs_block})")
+    lines.append(f"[BLOCK] abs={abs_block} sec={sector} blk={block_index}")
     
     if include_same_line and len(block_slices) > 1:
         # SAME line: show only identical bytes across all inputs

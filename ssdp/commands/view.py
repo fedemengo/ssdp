@@ -22,7 +22,12 @@ def main():
         "--format",
         help="Optional format for block labeling/annotations: mf1k, mf4k, mf1k[value], mf4k[value]",
     )
-    ap.add_argument("--units", help="Comma-separated list of unit sizes to display (subset of 1,2,4,8). Default: 2,4,8")
+    ap.add_argument(
+        "--chunk-size",
+        "--units",
+        dest="chunk_size",
+        help="Comma-separated list of chunk sizes to display (subset of 1,2,4,8). Default: 2,4,8",
+    )
     ap.add_argument("--show", help="Comma-separated subset of columns to show from: RAW,INT_BE,INT_LE,NOT_BE,NOT_LE,BIN,BIN_NOT,NOT_RAW. Default: all")
     ap.add_argument("--colorize", help="Comma-separated list of columns to colorize: RAW and/or any shown columns. Default: RAW")
     ap.add_argument("--ctx", type=Path, help="Diff context file (generated with 'ssdp diff --save-ctx')")
@@ -222,7 +227,7 @@ def main():
             # fields, so prefer that view unless the caller explicitly asks.
             try:
                 default_units = "4" if chip_format in {"mf1k", "mf4k"} else None
-                units_list = parse_units_arg(args.units or default_units)
+                units_list = parse_units_arg(args.chunk_size or default_units)
                 show_cols = parse_show_arg(args.show)
                 colorize_cols = parse_colorize_arg(args.colorize, show_cols)
             except Exception as e:

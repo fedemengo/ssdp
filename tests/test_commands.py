@@ -120,9 +120,9 @@ class TestDiffMifareFormat:
                 output = captured_output.getvalue()
                 assert "[MIFARE VALUE] value=1234567 adr=17 (0x11)" in output
                 assert "[MIFARE VALUE] value=1234568 adr=17 (0x11)" in output
-                assert "[units=4]" in output
-                assert "[units=2]" not in output
-                assert "[units=8]" not in output
+                assert "[chunk-size=4]" in output
+                assert "[chunk-size=2]" not in output
+                assert "[chunk-size=8]" not in output
 
     def test_mifare_value_filter_hides_non_value_diff_blocks(self):
         value1 = bytes.fromhex("87 D6 12 00 78 29 ED FF 87 D6 12 00 11 EE 11 EE")
@@ -342,9 +342,9 @@ class TestViewMifareFormat:
                         pass
 
                 output = captured_output.getvalue()
-                assert "[units=4]" in output
-                assert "[units=2]" not in output
-                assert "[units=8]" not in output
+                assert "[chunk-size=4]" in output
+                assert "[chunk-size=2]" not in output
+                assert "[chunk-size=8]" not in output
 
     def test_explicit_units_override_mifare_default(self):
         data = bytes.fromhex("87 D6 12 00 78 29 ED FF 87 D6 12 00 11 EE 11 EE")
@@ -373,8 +373,8 @@ class TestViewMifareFormat:
                         pass
 
                 output = captured_output.getvalue()
-                assert "[units=8]" in output
-                assert "[units=4]" not in output
+                assert "[chunk-size=8]" in output
+                assert "[chunk-size=4]" not in output
 
 
 class TestViewColor:

@@ -84,9 +84,9 @@ def print_block_units(
     for size in units:
         unit_header_color = "\033[1;36m"  # Bold cyan
         if use_color:
-            print(f"  {unit_header_color}[units={size}]{reset}")
+            print(f"  {unit_header_color}[chunk-size={size}]{reset}")
         else:
-            print(f"  [units={size}]")
+            print(f"  [chunk-size={size}]")
         
         # Get colors for each file
         colors = [ANSI_COLORS[i % len(ANSI_COLORS)] for i in range(len(aliases))]

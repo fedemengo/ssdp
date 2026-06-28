@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 
 def main():
-    """Compare binary dumps at unit boundaries."""
+    """Compare binary dumps at chunk boundaries."""
     
     ap = argparse.ArgumentParser(
         description="Compare binary dumps at unit boundaries"
@@ -19,8 +19,10 @@ def main():
         help="Optional format for block labeling/annotations: mf1k, mf4k, mf1k[value], mf4k[value]",
     )
     ap.add_argument(
+        "--chunk-size",
         "--units",
-        help="Comma-separated list of unit sizes to display (subset of 1,2,4,8). Default: 2,4,8",
+        dest="chunk_size",
+        help="Comma-separated list of chunk sizes to display (subset of 1,2,4,8). Default: 2,4,8",
     )
     ap.add_argument(
         "--show",
@@ -129,7 +131,7 @@ def main():
     
     try:
         default_units = "4" if chip_format in {"mf1k", "mf4k"} else None
-        units_list = parse_units_arg(args.units or default_units)
+        units_list = parse_units_arg(args.chunk_size or default_units)
         show_cols = parse_show_arg(args.show)  
         colorize_cols = parse_colorize_arg(args.colorize, show_cols)
     except:

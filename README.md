@@ -25,7 +25,7 @@ SSDP provides three main commands:
 Compare multiple dump files and show unit-level differences:
 
 ```bash
-# Basic diff with default 2,4,8 byte units
+# Basic diff with default 2,4,8 byte chunks
 ssdp diff dump1.bin dump2.bin
 
 # MIFARE 1K format with sector/block labels
@@ -34,7 +34,7 @@ ssdp diff dump1.bin dump2.bin --format mf1k
 # MIFARE 1K, only differing value blocks
 ssdp diff dump1.bin dump2.bin --format 'mf1k[value]'
 
-# Custom unit sizes and representations
+# Custom chunk sizes and representations
 ssdp diff dump1.bin dump2.bin --units 4,8 --show RAW,INT_LE,NOT_LE
 
 # Save diff context for later viewing
@@ -120,7 +120,7 @@ Diff blocks:
   [BLOCK] abs=09 (0x09) sec=2 blk=1
 
 [BLOCK] abs=08 (0x08) sec=2 blk=0
-  [units=4]
+  [chunk-size=4]
     data01: FULL=96 00 00 00 | 69 FF FF FF | 96 00 00 00 | 09 F6 09 F6
     data02: FULL=5E 01 00 00 | A1 FE FF FF | 5E 01 00 00 | 09 F6 09 F6
     +00
@@ -172,7 +172,7 @@ This shows only the units that differed in the original comparison, making it ea
 
 ### Common Options
 
-- `--units 1,2,4,8`: Unit sizes for analysis (default: 2,4,8; MIFARE formats default to 4)
+- `--units 1,2,4,8`: Chunk sizes for analysis (default: 2,4,8; MIFARE formats default to 4)
 - `--show RAW,INT_LE,NOT_LE`: Columns to display (default: all)
 - `--colorize RAW,INT_LE`: Columns to colorize (default: RAW)
 - `--color auto|always|never`: Control ANSI color output (default: auto)
